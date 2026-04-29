@@ -1,4 +1,4 @@
-import { Box, Static, Text } from 'ink';
+import { Box, Static, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { useCallback, useRef, useState } from 'react';
 import { query } from '../agent/query.js';
@@ -20,23 +20,36 @@ interface Props {
 
 type Mode = 'idle' | 'busy' | 'awaiting_permission';
 
+const EXIT_HINT_MS = 2000;
+
 export function Repl({ client, cwd, permissionMode }: Props) {
+  const { exit } = useApp();
+
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [draft, setDraft] = useState('');
   const [mode, setMode] = useState<Mode>('idle');
   const [pending, setPending] = useState<{ tool: Tool; call: ToolCall } | null>(null);
+  const [exitHint, setExitHint] = useState(false);
 
-  // The conversation messages we send to the LLM. Kept in a ref so the agent
-  // loop reads the current value without React re-render coupling.
+  // Conversation history sent to the LLM, kept in a ref so the agent loop
+  // reads the current value without re-render coupling.
   const messagesRef = useRef<Message[]>([
     { role: 'system', content: buildSystemPrompt(cwd) },
   ]);
 
   const permissionResolverRef = useRef<((d: PermissionDecision) => void) | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const exitArmedRef = useRef(false);
+  const exitTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const askUser = useCallback(
     (tool: Tool, call: ToolCall): Promise<PermissionDecision> => {
       return new Promise((resolve) => {
+        // If the user already cancelled, deny without prompting.
+        if (abortRef.current?.signal.aborted) {
+          resolve({ allow: false, reason: 'Cancelled' });
+          return;
+        }
         permissionResolverRef.current = resolve;
         setPending({ tool, call });
         setMode('awaiting_permission');
@@ -53,6 +66,38 @@ export function Repl({ client, cwd, permissionMode }: Props) {
     resolver?.(decision);
   }, []);
 
+  const cancelTurn = useCallback(() => {
+    // Resolve any dangling permission with deny so runTools unblocks, then
+    // abort the controller so the next LLM call rejects immediately.
+    const resolver = permissionResolverRef.current;
+    permissionResolverRef.current = null;
+    setPending(null);
+    resolver?.({ allow: false, reason: 'Cancelled by user' });
+    abortRef.current?.abort();
+  }, []);
+
+  useInput((input, key) => {
+    if (!(key.ctrl && input === 'c')) return;
+
+    if (mode !== 'idle') {
+      cancelTurn();
+      return;
+    }
+
+    if (exitArmedRef.current) {
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+      exit();
+      return;
+    }
+
+    exitArmedRef.current = true;
+    setExitHint(true);
+    exitTimerRef.current = setTimeout(() => {
+      exitArmedRef.current = false;
+      setExitHint(false);
+    }, EXIT_HINT_MS);
+  });
+
   const onSubmit = useCallback(
     async (input: string) => {
       const text = input.trim();
@@ -61,11 +106,11 @@ export function Repl({ client, cwd, permissionMode }: Props) {
       setDraft('');
       setMode('busy');
 
-      // Append the user turn to both transcript and message history.
       setTranscript((t) => [...t, { kind: 'user', text }]);
       messagesRef.current = [...messagesRef.current, { role: 'user', content: text }];
 
       const ctrl = new AbortController();
+      abortRef.current = ctrl;
       const canUseTool = makeCanUseTool(permissionMode, askUser);
 
       const gen = query({
@@ -76,7 +121,6 @@ export function Repl({ client, cwd, permissionMode }: Props) {
         ctx: { cwd, signal: ctrl.signal },
       });
 
-      // Track the in-flight assistant item index so deltas update the same row.
       let assistantIdx: number | null = null;
       const toolIdxByCallId = new Map<string, number>();
 
@@ -147,9 +191,14 @@ export function Repl({ client, cwd, permissionMode }: Props) {
           }
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setTranscript((t) => [...t, { kind: 'error', text: msg }]);
+        if (ctrl.signal.aborted) {
+          setTranscript((t) => [...t, { kind: 'error', text: 'Cancelled.' }]);
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          setTranscript((t) => [...t, { kind: 'error', text: msg }]);
+        }
       } finally {
+        abortRef.current = null;
         setMode('idle');
       }
     },
@@ -162,7 +211,7 @@ export function Repl({ client, cwd, permissionMode }: Props) {
         {() => (
           <Box key="banner" flexDirection="column" marginBottom={1}>
             <Text color="cyan" bold>deepseek-code</Text>
-            <Text color="gray">cwd: {cwd}  ·  mode: {permissionMode}  ·  Ctrl+C to exit</Text>
+            <Text color="gray">cwd: {cwd}  ·  mode: {permissionMode}  ·  Ctrl+C to cancel / exit</Text>
           </Box>
         )}
       </Static>
@@ -178,15 +227,21 @@ export function Repl({ client, cwd, permissionMode }: Props) {
       )}
 
       {mode === 'idle' && (
-        <Box>
-          <Text color="cyan">{'> '}</Text>
-          <TextInput value={draft} onChange={setDraft} onSubmit={onSubmit} />
+        <Box flexDirection="column">
+          {exitHint && (
+            <Text color="yellow">Press Ctrl+C again to exit</Text>
+          )}
+          <Box>
+            <Text color="cyan">{'> '}</Text>
+            <TextInput value={draft} onChange={setDraft} onSubmit={onSubmit} />
+          </Box>
         </Box>
       )}
 
       {mode === 'busy' && (
         <Box>
-          <Text color="yellow">… thinking</Text>
+          <Text color="yellow">… thinking  </Text>
+          <Text color="gray">(Ctrl+C to cancel)</Text>
         </Box>
       )}
     </Box>

@@ -19,6 +19,18 @@ export async function* runTools(
   const resultMessages: Message[] = [];
 
   for (const call of toolCalls) {
+    if (ctx.signal.aborted) {
+      // User cancelled mid-batch — feed a tombstone tool_result for every
+      // remaining tool_use so the LLM transcript stays well-formed if the
+      // session continues, then stop.
+      resultMessages.push({
+        role: 'tool',
+        toolCallId: call.id,
+        content: 'Cancelled by user before execution.',
+      });
+      continue;
+    }
+
     yield { type: 'tool_call_requested', call };
 
     const tool = tools.get(call.name);
