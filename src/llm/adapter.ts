@@ -15,7 +15,12 @@ export function toolsToOpenAI(
     function: {
       name: t.name,
       description: t.description,
-      parameters: zodToJsonSchema(t.inputSchema, { target: 'openApi3' }) as Record<string, unknown>,
+      parameters: zodToJsonSchema(t.inputSchema, {
+        // Default JSON Schema 7. Avoid `target: 'openApi3'` — it emits the
+        // legacy `exclusiveMinimum: true` boolean form, which OpenAI/DeepSeek
+        // reject as "true is not of type number".
+        $refStrategy: 'none',
+      }) as Record<string, unknown>,
     },
   }));
 }
