@@ -16,7 +16,7 @@ export function loadSettings(): Settings {
   }
   return {
     apiKey,
-    model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+    model: process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
     baseURL: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
   };
 }
