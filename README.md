@@ -2,7 +2,9 @@
 
 A minimal Claude-Code-style CLI coding agent powered by DeepSeek.
 
-This is a v0 closed loop: streaming chat, tool calls with per-call permission prompts, and four built-in tools (Read, Write, Edit, Bash). The architecture mirrors Claude Code at a high level — generator-based agent loop, Zod tool schemas, awaitable permission gate, Ink-based TUI — so growing the surface (slash commands, sessions, MCP, hooks) is mostly additive.
+This is a v0 closed loop: streaming chat, tool calls with per-call permission prompts, and six built-in tools (Read, Write, Edit, Bash, Glob, Grep). The architecture mirrors Claude Code at a high level — generator-based agent loop, Zod tool schemas, awaitable permission gate, Ink-based TUI — so growing the surface (slash commands, sessions, MCP, hooks) is mostly additive.
+
+**Ctrl+C**: cancels the current turn (aborts the in-flight LLM stream and any running shell command). Press twice while idle to exit.
 
 ## Quick start
 
@@ -52,7 +54,9 @@ src/
 │   ├── ReadTool.ts
 │   ├── WriteTool.ts
 │   ├── EditTool.ts
-│   └── BashTool.ts
+│   ├── BashTool.ts
+│   ├── GlobTool.ts
+│   └── GrepTool.ts
 ├── permissions/
 │   └── canUseTool.ts     # awaitable permission gate
 ├── config/
@@ -80,7 +84,7 @@ Implement `Tool<Input>` from `src/tools/Tool.ts` (`name`, `description`, `inputS
 
 - Slash commands (`/clear`, `/compact`, `/help`)
 - Session persistence + resume
-- Glob / Grep / WebFetch tools
+- WebFetch tool
 - Hooks (PreToolUse / PostToolUse / Stop)
 - MCP client
 - `CLAUDE.md`-equivalent project-memory injection

@@ -34,6 +34,7 @@ async function main() {
 
   const { waitUntilExit } = render(
     createElement(App, { client, cwd, permissionMode }),
+    { exitOnCtrlC: false },
   );
   await waitUntilExit();
 }
